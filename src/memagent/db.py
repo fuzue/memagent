@@ -65,10 +65,46 @@ def init_db() -> None:
                 FOREIGN KEY (topic_id) REFERENCES topic_nodes(id)
             );
 
+            CREATE TABLE IF NOT EXISTS episodes (
+                id           TEXT PRIMARY KEY,
+                session_file TEXT,
+                started_at   REAL NOT NULL,
+                ended_at     REAL NOT NULL,
+                transcript   TEXT NOT NULL,
+                summary      TEXT,
+                embedding    BLOB
+            );
+
+            CREATE TABLE IF NOT EXISTS episode_turns (
+                id          TEXT PRIMARY KEY,
+                episode_id  TEXT NOT NULL,
+                role        TEXT NOT NULL,
+                text        TEXT NOT NULL,
+                timestamp   REAL NOT NULL,
+                embedding   BLOB,
+                FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE
+            );
+
+            CREATE TABLE IF NOT EXISTS entity_episode_links (
+                entity_node_id  TEXT NOT NULL,
+                episode_id      TEXT NOT NULL,
+                relevance_score REAL DEFAULT 1.0,
+                created_at      REAL NOT NULL,
+                PRIMARY KEY (entity_node_id, episode_id),
+                FOREIGN KEY (entity_node_id) REFERENCES topic_nodes(id) ON DELETE CASCADE,
+                FOREIGN KEY (episode_id)     REFERENCES episodes(id)    ON DELETE CASCADE
+            );
+
             CREATE INDEX IF NOT EXISTS idx_events_session
                 ON events(session_id, consolidated);
             CREATE INDEX IF NOT EXISTS idx_events_timestamp
                 ON events(timestamp DESC);
             CREATE INDEX IF NOT EXISTS idx_topic_updated
                 ON topic_nodes(updated_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_episodes_started
+                ON episodes(started_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_episode_turns_episode
+                ON episode_turns(episode_id);
+            CREATE INDEX IF NOT EXISTS idx_entity_episode_entity
+                ON entity_episode_links(entity_node_id);
         """)

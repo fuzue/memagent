@@ -1,19 +1,20 @@
 """memagent CLI.
 
 Commands:
-  memagent hook post-tool-use   called by Claude Code PostToolUse hook (reads stdin)
-  memagent hook stop            called by Claude Code Stop hook
-  memagent consolidate          manually run consolidation for current session
-  memagent recall <query>       test retrieval from the command line
-  memagent status               show current session and graph stats
-  memagent init                 create DB and download embedding model
+  memagent consolidate-session   read active Claude Code session, extract entities (run via cron)
+  memagent remember <text>       explicitly store a fact mid-session
+  memagent recall <query>        test retrieval from the command line
+  memagent graph                 export knowledge graph as HTML and open in browser
+  memagent status                show graph stats and last consolidation time
+  memagent init                  create DB and download embedding model
 """
 from __future__ import annotations
 
 import json
-import os
 import sys
-import time
+from pathlib import Path
+
+CHECKPOINT_FILE = Path.home() / ".memagent" / "checkpoint.json"
 
 
 def main():
@@ -24,14 +25,21 @@ def main():
 
     cmd = args[0]
 
-    if cmd == "hook" and len(args) > 1:
-        subcmd = args[1]
-        if subcmd == "post-tool-use":
-            _hook_post_tool_use()
-        elif subcmd == "stop":
-            _hook_stop()
-    elif cmd == "consolidate":
-        _cmd_consolidate()
+    if cmd == "consolidate-session":
+        _cmd_consolidate_session()
+    elif cmd == "graph":
+        _cmd_graph()
+    elif cmd == "episodes":
+        if len(args) > 1:
+            _cmd_episode_detail(args[1])
+        else:
+            _cmd_episodes_list()
+    elif cmd == "remember":
+        text = " ".join(args[1:])
+        if not text:
+            print("Usage: memagent remember <text>", file=sys.stderr)
+            sys.exit(1)
+        _cmd_remember(text)
     elif cmd == "recall":
         query = " ".join(args[1:]) if len(args) > 1 else "current project context"
         _cmd_recall(query)
@@ -44,171 +52,205 @@ def main():
         sys.exit(1)
 
 
-# ── Hooks ─────────────────────────────────────────────────────────────────────
-
-TRACKED_TOOLS = {"Write", "Edit", "Bash"}
-
-
-def _hook_post_tool_use():
-    try:
-        raw = sys.stdin.read()
-        data = json.loads(raw)
-    except Exception:
-        return
-
-    tool_name = data.get("tool_name", "")
-    if tool_name not in TRACKED_TOOLS:
-        return
-
-    text = _extract_event_text(tool_name, data)
-    if not text:
-        return
-
-    file_path = _extract_file_path(tool_name, data)
-
-    from .db import init_db
-    from .models import Event
-    from .store import add_event, get_or_create_session
-
-    init_db()
-    session = get_or_create_session(cwd=os.getcwd())
-    event = Event.new(
-        session_id=session.id,
-        text=text,
-        tool_name=tool_name,
-        file_path=file_path,
-    )
-    add_event(event)
-
-    # Background embedding — non-blocking
-    import threading
-    def _embed():
-        try:
-            from .embedder import embed_one, to_bytes
-            from .store import update_event_embedding
-            update_event_embedding(event.id, to_bytes(embed_one(text)))
-        except Exception:
-            pass
-    threading.Thread(target=_embed, daemon=True).start()
-
-
-def _hook_stop():
-    try:
-        raw = sys.stdin.read()
-    except Exception:
-        raw = "{}"
-
-    from pathlib import Path
-    session_file = Path.home() / ".memagent" / "session.json"
-    if not session_file.exists():
-        return
-
-    try:
-        session_data = json.loads(session_file.read_text())
-        session_id = session_data["id"]
-    except Exception:
-        return
-
-    try:
-        from .consolidation import consolidate
-        from .store import end_session
-        n = consolidate(session_id)
-        end_session(session_id)
-        print(f"[memagent] Session consolidated: {n} new topic nodes", file=sys.stderr)
-    except Exception as e:
-        print(f"[memagent] Consolidation error: {e}", file=sys.stderr)
-
-
-def _extract_event_text(tool_name: str, data: dict) -> str:
-    inp = data.get("tool_input", {})
-
-    if tool_name == "Write":
-        path = inp.get("file_path", "")
-        content = inp.get("content", "")
-        preview = content[:400] + ("..." if len(content) > 400 else "")
-        return f"Wrote {path}:\n{preview}"
-
-    if tool_name == "Edit":
-        path = inp.get("file_path", "")
-        old = inp.get("old_string", "")[:150]
-        new = inp.get("new_string", "")[:150]
-        return f"Edited {path}:\n- {old}\n+ {new}"
-
-    if tool_name == "Bash":
-        cmd = inp.get("command", "")[:200]
-        response = data.get("tool_response", "")
-        if isinstance(response, dict):
-            response = response.get("text") or response.get("output") or str(response)
-        output = str(response)[:400]
-        return f"Ran: {cmd}\n{output}"
-
-    return ""
-
-
-def _extract_file_path(tool_name: str, data: dict) -> str | None:
-    inp = data.get("tool_input", {})
-    if tool_name in ("Write", "Edit"):
-        return inp.get("file_path")
-    return None
-
-
 # ── Commands ──────────────────────────────────────────────────────────────────
 
-def _cmd_consolidate():
-    from pathlib import Path
-    session_file = Path.home() / ".memagent" / "session.json"
-    if not session_file.exists():
-        print("No active session.", file=sys.stderr)
-        return
-    session_data = json.loads(session_file.read_text())
-    session_id = session_data["id"]
+def _cmd_consolidate_session():
+    from .consolidation import consolidate_turns
+    from .db import init_db
+    from .session_reader import find_active_session_file, read_turns_since
 
-    from .consolidation import consolidate
-    from .store import end_session
-    print(f"Consolidating session {session_id}...", file=sys.stderr)
-    n = consolidate(session_id)
-    end_session(session_id)
-    print(f"Done. {n} new topic nodes created.")
+    init_db()
+
+    session_file = find_active_session_file()
+    if not session_file:
+        print("[memagent] No Claude Code session found.", file=sys.stderr)
+        return
+
+    checkpoint = _load_checkpoint()
+    file_key = str(session_file)
+    since_iso = checkpoint.get("sessions", {}).get(file_key)
+
+    turns = read_turns_since(session_file, since_iso)
+    if not turns:
+        print("[memagent] No new turns since last consolidation.", file=sys.stderr)
+        return
+
+    result = consolidate_turns(turns, session_file=str(session_file))
+
+    # Checkpoint at the timestamp of the last turn we processed
+    if turns[-1].iso_ts:
+        checkpoint.setdefault("sessions", {})[file_key] = turns[-1].iso_ts
+        _save_checkpoint(checkpoint)
+
+    print(
+        f"[memagent] episode {result['episode_id'][:8] if result['episode_id'] else '-'} "
+        f"| {len(turns)} turns | {result['nodes_created']} new entities "
+        f"| {result['entities_touched']} entities touched "
+        f"| {result['edges_created']} edges from {session_file.name}",
+        file=sys.stderr,
+    )
+
+
+def _cmd_graph():
+    import http.server
+    import socket
+    import subprocess
+    import threading
+    from .db import init_db
+    from .graph_export import export_html
+
+    init_db()
+    output = Path.home() / ".memagent" / "graph.html"
+    export_html(output)
+
+    # Find a free port
+    with socket.socket() as s:
+        s.bind(("", 0))
+        port = s.getsockname()[1]
+
+    serve_dir = str(output.parent)
+    handler = http.server.SimpleHTTPRequestHandler
+    httpd = http.server.HTTPServer(("", port), lambda *a, **kw: handler(*a, directory=serve_dir, **kw))
+
+    url = f"http://localhost:{port}/graph.html"
+    print(f"Serving at {url}  (Ctrl+C to stop)", file=sys.stderr)
+
+    threading.Thread(target=lambda: subprocess.call(["xdg-open", url]), daemon=True).start()
+    try:
+        httpd.serve_forever()
+    except KeyboardInterrupt:
+        httpd.shutdown()
+
+
+def _cmd_episodes_list():
+    import time as _time
+    from .db import get_conn, init_db
+    init_db()
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT e.id, e.summary, e.started_at, e.ended_at,
+                      (SELECT COUNT(*) FROM episode_turns WHERE episode_id=e.id) AS n_turns,
+                      (SELECT COUNT(*) FROM entity_episode_links WHERE episode_id=e.id) AS n_entities
+               FROM episodes e
+               ORDER BY e.started_at DESC"""
+        ).fetchall()
+
+    if not rows:
+        print("No episodes archived yet.")
+        return
+
+    for r in rows:
+        date = _time.strftime("%Y-%m-%d %H:%M", _time.localtime(r["started_at"]))
+        dur_min = (r["ended_at"] - r["started_at"]) / 60
+        print(f"{r['id'][:8]} | {date} | {dur_min:5.0f}m | {r['n_turns']:3} turns | {r['n_entities']} entities")
+        print(f"         {r['summary'][:200]}\n")
+
+
+def _cmd_episode_detail(episode_id_prefix: str):
+    import time as _time
+    from .db import get_conn, init_db
+    init_db()
+    with get_conn() as conn:
+        ep = conn.execute(
+            "SELECT * FROM episodes WHERE id LIKE ?",
+            (episode_id_prefix + "%",)
+        ).fetchone()
+        if not ep:
+            print(f"Episode {episode_id_prefix} not found.")
+            return
+        turns = conn.execute(
+            "SELECT role, text, timestamp FROM episode_turns WHERE episode_id=? ORDER BY timestamp",
+            (ep["id"],)
+        ).fetchall()
+        entities = conn.execute(
+            """SELECT t.csum FROM entity_episode_links l
+               JOIN topic_nodes t ON t.id = l.entity_node_id
+               WHERE l.episode_id=?""",
+            (ep["id"],)
+        ).fetchall()
+
+    print(f"Episode: {ep['id']}")
+    print(f"Period:  {_time.strftime('%Y-%m-%d %H:%M', _time.localtime(ep['started_at']))} → "
+          f"{_time.strftime('%H:%M', _time.localtime(ep['ended_at']))}")
+    print(f"Summary: {ep['summary']}\n")
+
+    print(f"Linked entities ({len(entities)}):")
+    for e in entities:
+        print(f"  • {e['csum'][:120]}")
+
+    print(f"\nTurns ({len(turns)}):")
+    for t in turns:
+        ts = _time.strftime("%H:%M:%S", _time.localtime(t["timestamp"]))
+        role = "User " if t["role"] == "user" else "Claude"
+        preview = t["text"][:200].replace("\n", " ")
+        print(f"  [{ts}] {role}: {preview}")
+
+
+def _cmd_remember(text: str):
+    import time as _time
+    from .consolidation import consolidate_turns
+    from .db import init_db
+    from .session_reader import Turn
+
+    init_db()
+    now = _time.time()
+    turn = Turn(role="user", text=f"Remember this: {text}", timestamp=now, iso_ts="")
+    result = consolidate_turns([turn], session_file="manual:remember")
+    print(
+        f"Stored. {result['nodes_created']} new entities, "
+        f"{result['entities_touched']} touched.",
+        file=sys.stderr,
+    )
 
 
 def _cmd_recall(query: str):
     from .retrieval import format_context, recall
-    from pathlib import Path
+    from .db import init_db
 
-    session_id = None
-    session_file = Path.home() / ".memagent" / "session.json"
-    if session_file.exists():
-        session_id = json.loads(session_file.read_text()).get("id")
-
-    results = recall(query, session_id=session_id)
+    init_db()
+    results = recall(query)
     print(format_context(results))
 
 
 def _cmd_status():
     from .db import get_conn, init_db
+
     init_db()
     with get_conn() as conn:
-        n_events = conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]
         n_topics = conn.execute("SELECT COUNT(*) FROM topic_nodes").fetchone()[0]
         n_edges = conn.execute("SELECT COUNT(*) FROM topic_edges").fetchone()[0]
-        n_sessions = conn.execute("SELECT COUNT(*) FROM sessions").fetchone()[0]
 
-    from pathlib import Path
-    session_file = Path.home() / ".memagent" / "session.json"
-    active = "yes" if session_file.exists() else "no"
+    checkpoint = _load_checkpoint()
+    sessions = checkpoint.get("sessions", {})
+    last = max(sessions.values()) if sessions else "never"
 
-    print(f"Active session: {active}")
-    print(f"Sessions: {n_sessions}")
-    print(f"Events: {n_events}")
-    print(f"Topic nodes: {n_topics}")
-    print(f"Topic edges: {n_edges}")
+    print(f"Topic nodes : {n_topics}")
+    print(f"Topic edges : {n_edges}")
+    print(f"Last run    : {last}")
 
 
 def _cmd_init():
     from .db import init_db
+
     init_db()
     print("Database initialised.", file=sys.stderr)
     print("Downloading embedding model (first time only)...", file=sys.stderr)
     from .embedder import embed_one
     embed_one("test")
     print("Ready.")
+
+
+# ── Checkpoint helpers ────────────────────────────────────────────────────────
+
+def _load_checkpoint() -> dict:
+    if CHECKPOINT_FILE.exists():
+        try:
+            return json.loads(CHECKPOINT_FILE.read_text())
+        except Exception:
+            pass
+    return {}
+
+
+def _save_checkpoint(data: dict) -> None:
+    CHECKPOINT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CHECKPOINT_FILE.write_text(json.dumps(data, indent=2))

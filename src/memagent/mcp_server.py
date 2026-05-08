@@ -31,16 +31,14 @@ mcp = CompatFastMCP("memagent")
 
 @mcp.tool()
 def recall_context(query: str) -> str:
-    """Retrieve relevant context from memory for a given query.
+    """Query the knowledge graph for context relevant to the current conversation.
 
-    Call this autonomously when you need background context about the user,
-    their projects, past decisions, or ongoing work. The query should be a
-    natural language description of what you are trying to understand.
+    Use this whenever the conversation touches on people, projects, companies,
+    decisions, constraints, or anything that might have prior history. Returns
+    only the most relevant nodes — not the full graph.
 
-    Examples:
-      recall_context("Acme company background and location")
-      recall_context("current sprint goals for ProjectX")
-      recall_context("why was confidence scoring removed")
+    The query should reflect what is being discussed right now, not a generic
+    description. Bad: "user context". Good: "grants and funding options for ProjectX".
     """
     session = get_or_create_session(cwd=os.getcwd())
     results = recall(query, session_id=session.id)

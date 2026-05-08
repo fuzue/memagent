@@ -1,208 +1,229 @@
+"""Three-tier consolidation: EPG turns → Archive episode → Entity graph (TAN).
+
+Inspired by GAM (arxiv 2604.12285): write isolation between real-time event
+buffer and stable entity graph, with cross-links so episodes remain queryable.
+"""
 from __future__ import annotations
 
 import json
-import os
-from typing import List, Optional
+import subprocess
+import time
+import uuid
+from typing import Optional
 
-import anthropic
-
-from .embedder import embed_one, to_bytes
-from .models import Event, TopicNode
+from .embedder import cosine_similarity, embed_one, from_bytes, to_bytes
+from .models import TopicNode
+from .session_reader import Turn, turns_to_transcript
 from .store import (
-    add_cross_link, add_topic_edge, add_topic_node,
-    get_all_topic_nodes, get_unconsolidated_events,
-    mark_events_consolidated, update_topic_node,
+    add_entity_episode_link, add_episode, add_episode_turn, add_topic_edge,
+    add_topic_node, get_all_topic_nodes, update_topic_node,
 )
 
-_client: Optional[anthropic.Anthropic] = None
+MERGE_THRESHOLD = 0.82
+RELATED_THRESHOLD = 0.60
 
 
-def _llm() -> anthropic.Anthropic:
-    global _client
-    if _client is None:
-        _client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
-    return _client
+def consolidate_turns(turns: list[Turn], session_file: str = "") -> dict:
+    """Process a batch of turns into the three tiers.
 
+    Returns: {episode_id, nodes_created, edges_created}
+    """
+    if not turns:
+        return {"episode_id": None, "nodes_created": 0, "edges_created": 0}
 
-MODEL = "claude-haiku-4-5-20251001"
+    transcript = turns_to_transcript(turns)
+    started_at = turns[0].timestamp or time.time()
+    ended_at = turns[-1].timestamp or time.time()
 
+    # Tier 2: extract entities + episode summary, chunked if transcript is long
+    extracted = _extract_chunked(transcript)
+    summary = extracted.get("summary", f"Conversation with {len(turns)} turns")
+    entities = extracted.get("entities", [])
+    raw_edges = extracted.get("edges", [])
 
-def consolidate(session_id: str) -> int:
-    events = get_unconsolidated_events(session_id)
-    if not events:
-        return 0
+    # Archive episode
+    episode_id = str(uuid.uuid4())
+    add_episode(
+        episode_id=episode_id,
+        session_file=session_file,
+        started_at=started_at,
+        ended_at=ended_at,
+        transcript=transcript,
+        summary=summary,
+        embedding=to_bytes(embed_one(summary)),
+    )
 
-    segments = _segment_events(events)
+    # Archive individual turns (Tier 1 frozen)
+    for t in turns:
+        add_episode_turn(
+            turn_id=str(uuid.uuid4()),
+            episode_id=episode_id,
+            role=t.role,
+            text=t.text,
+            timestamp=t.timestamp,
+            embedding=None,  # turns embedded lazily on first query
+        )
+
+    # Tier 3: update entity graph
+    existing = get_all_topic_nodes()
     nodes_created = 0
+    touched_node_ids: set[str] = set()
 
-    for seg in segments:
-        csum = seg["csum"]
-        craw = "\n".join(seg["texts"])
-        entity_type = seg.get("entity_type", "fact")
+    for ent in entities:
+        name: str = ent.get("name", "").strip()
+        etype: str = ent.get("type", "fact")
+        facts: list[str] = ent.get("facts", [])
+        if not name or not facts:
+            continue
 
-        embedding = to_bytes(embed_one(csum))
+        craw = f"# {name}\n" + "\n".join(f"- {f}" for f in facts)
+        csum = f"{name}: " + "; ".join(facts[:3])
+        new_vec = embed_one(csum)
 
-        existing = get_all_topic_nodes()
-        matched_id = _find_matching_topic(csum, existing) if existing else None
-
-        if matched_id:
-            existing_node = next(n for n in existing if n.id == matched_id)
-            merged_craw = existing_node.craw + "\n\n---\n\n" + craw
-            merged_csum = _merge_summaries(existing_node.csum, csum)
-            merged_embedding = to_bytes(embed_one(merged_csum))
-            update_topic_node(matched_id, merged_csum, merged_craw, merged_embedding)
-            add_cross_link(matched_id, session_id)
+        matched = _find_matching_node(name, new_vec, existing)
+        if matched:
+            merged_craw = matched.craw + "\n" + "\n".join(f"- {f}" for f in facts)
+            merged_embedding = to_bytes(embed_one(matched.csum))
+            update_topic_node(matched.id, matched.csum, merged_craw, merged_embedding)
+            touched_node_ids.add(matched.id)
+            for n in existing:
+                if n.id == matched.id:
+                    n.craw = merged_craw
+                    n.embedding = merged_embedding
         else:
-            node = TopicNode.new(csum=csum, craw=craw, entity_type=entity_type)
-            node.embedding = embedding
+            node = TopicNode.new(csum=csum, craw=craw, entity_type=etype)
+            node.embedding = to_bytes(new_vec)
             add_topic_node(node)
-            add_cross_link(node.id, session_id)
+            existing.append(node)
+            touched_node_ids.add(node.id)
             nodes_created += 1
 
-            # Link to semantically related existing nodes
-            _link_to_related(node, existing)
+    # Cross-links: every entity touched by this episode is linked to it
+    for nid in touched_node_ids:
+        add_entity_episode_link(nid, episode_id, score=1.0)
 
-    mark_events_consolidated(session_id)
-    return nodes_created
+    # Typed edges from extraction
+    name_to_id = {n.csum.split(":")[0].strip().lower(): n.id for n in existing}
+    edges_created = 0
+    for e in raw_edges:
+        src = name_to_id.get(e.get("from", "").strip().lower())
+        tgt = name_to_id.get(e.get("to", "").strip().lower())
+        etype = e.get("type", "RELATED_TO")
+        if src and tgt and src != tgt:
+            add_topic_edge(src, tgt, etype, weight=1.0)
+            edges_created += 1
+
+    return {
+        "episode_id": episode_id,
+        "nodes_created": nodes_created,
+        "edges_created": edges_created,
+        "entities_touched": len(touched_node_ids),
+    }
 
 
-def _segment_events(events: List[Event]) -> List[dict]:
-    event_text = "\n".join(
-        f"[{i+1}] ({e.tool_name or 'note'}) {e.text[:300]}"
-        for i, e in enumerate(events)
-    )
+def _extract_chunked(transcript: str, chunk_size: int = 8000) -> dict:
+    """Extract entities/edges/summary across chunks and merge results."""
+    if len(transcript) <= chunk_size:
+        return _extract(transcript)
 
-    prompt = f"""You are analyzing work session events and must segment them into coherent topic chunks.
+    summaries: list[str] = []
+    entities_by_name: dict[str, dict] = {}
+    edges_seen: set[tuple] = set()
+    edges: list[dict] = []
 
-Events:
-{event_text}
+    for i in range(0, len(transcript), chunk_size):
+        chunk = transcript[i:i + chunk_size]
+        result = _extract(chunk)
+        if not result:
+            continue
+        if result.get("summary"):
+            summaries.append(result["summary"])
+        for ent in result.get("entities", []):
+            name = ent.get("name", "").strip()
+            if not name:
+                continue
+            key = name.lower()
+            if key in entities_by_name:
+                # Merge facts, dedupe
+                existing_facts = set(entities_by_name[key].get("facts", []))
+                for f in ent.get("facts", []):
+                    if f not in existing_facts:
+                        entities_by_name[key].setdefault("facts", []).append(f)
+                        existing_facts.add(f)
+            else:
+                entities_by_name[key] = {
+                    "name": name,
+                    "type": ent.get("type", "fact"),
+                    "facts": list(ent.get("facts", [])),
+                }
+        for e in result.get("edges", []):
+            sig = (e.get("from", "").lower(), e.get("to", "").lower(), e.get("type", ""))
+            if sig not in edges_seen and all(sig):
+                edges_seen.add(sig)
+                edges.append(e)
 
-Instructions:
-- Group consecutive related events into 2-6 segments
-- Each segment should cover a single coherent topic or task
-- For each segment provide: a 1-2 sentence summary (csum), the entity type, and which event numbers belong to it
-- Entity types: fact, decision, work, problem, solution, person, project
+    return {
+        "summary": " | ".join(summaries[:3])[:300] if summaries else "",
+        "entities": list(entities_by_name.values()),
+        "edges": edges,
+    }
 
-Return ONLY valid JSON in this format:
+
+def _extract(transcript: str) -> dict:
+    """Single Haiku call: returns episode summary + entities + edges."""
+    prompt = f"""Analyze this conversation and extract structured memory.
+
+Rules:
+- Only extract facts explicitly stated. No inferences, no meta-references.
+- Focus on long-term memory: people, projects, companies, tools, decisions, constraints.
+- Ignore ephemeral actions (running commands, reading files, tool outputs).
+
+Conversation:
+{transcript[:8000]}
+
+Return ONLY valid JSON:
 {{
-  "segments": [
-    {{
-      "event_indices": [1, 2, 3],
-      "csum": "concise summary of what happened",
-      "entity_type": "work"
-    }}
+  "summary": "1-2 sentence description of what was discussed in this episode",
+  "entities": [
+    {{"name": "Alice", "type": "person", "facts": ["founder of Acme", "based in Berlin"]}},
+    {{"name": "ProjectX", "type": "project", "facts": ["AI reasoning partner for wet labs"]}}
+  ],
+  "edges": [
+    {{"from": "Alice", "to": "Acme", "type": "FOUNDED"}},
+    {{"from": "Acme", "to": "ProjectX", "type": "OWNS"}}
   ]
-}}"""
+}}
 
-    response = _llm().messages.create(
-        model=MODEL,
-        max_tokens=1024,
-        messages=[{"role": "user", "content": prompt}],
-    )
+Use snake_case for entity types and SCREAMING_SNAKE for edge types. Common entity types: person, project, company, tool, decision, constraint, grant. Common edge types: FOUNDED, OWNS, WORKS_ON, COLLABORATES_WITH, MEMBER_OF, PART_OF, BLOCKS, FUNDS. You may invent new types when they describe the relationship more precisely than any of these."""
 
     try:
-        raw = response.content[0].text.strip()
+        result = subprocess.run(
+            ["claude", "--model", "claude-haiku-4-5-20251001", "-p", prompt],
+            capture_output=True, text=True, timeout=60,
+        )
+        raw = result.stdout.strip()
         if raw.startswith("```"):
             raw = raw.split("```")[1]
             if raw.startswith("json"):
                 raw = raw[4:]
-        data = json.loads(raw)
+        return json.loads(raw)
     except Exception:
-        # Fallback: treat all events as one segment
-        return [{
-            "texts": [e.text for e in events],
-            "csum": f"Session with {len(events)} events covering: {events[0].text[:100]}",
-            "entity_type": "work",
-        }]
-
-    result = []
-    for seg in data.get("segments", []):
-        indices = [i - 1 for i in seg.get("event_indices", []) if 1 <= i <= len(events)]
-        texts = [events[i].text for i in indices if i < len(events)]
-        if texts:
-            result.append({
-                "texts": texts,
-                "csum": seg.get("csum", ""),
-                "entity_type": seg.get("entity_type", "fact"),
-            })
-
-    return result if result else [{"texts": [e.text for e in events], "csum": "Session events", "entity_type": "work"}]
+        return {}
 
 
-def _find_matching_topic(new_csum: str, existing: List[TopicNode]) -> Optional[str]:
-    if not existing:
-        return None
+def _find_matching_node(name: str, new_vec, existing: list[TopicNode]) -> Optional[TopicNode]:
+    name_lower = name.lower()
+    for node in existing:
+        if node.csum.lower().startswith(name_lower + ":") or node.csum.lower() == name_lower:
+            return node
 
-    # Coarse filter: top 5 by embedding similarity
-    from .embedder import cosine_similarity, embed_one, from_bytes
-    new_vec = embed_one(new_csum)
-    scored = []
+    best: Optional[TopicNode] = None
+    best_sim = MERGE_THRESHOLD
     for node in existing:
         if node.embedding is None:
             continue
         sim = cosine_similarity(new_vec, from_bytes(node.embedding))
-        scored.append((node, sim))
-    scored.sort(key=lambda x: x[1], reverse=True)
-    candidates = scored[:5]
-
-    if not candidates or candidates[0][1] < 0.5:
-        return None
-
-    # Fine filter: LLM decides
-    candidate_text = "\n".join(
-        f"{i+1}. [{n.entity_type}] {n.csum}"
-        for i, (n, _) in enumerate(candidates)
-    )
-
-    prompt = f"""New topic summary: "{new_csum}"
-
-Existing topics:
-{candidate_text}
-
-Is the new topic the same as any existing topic (same subject, should be merged)?
-Return ONLY JSON: {{"match": 1}} if it matches topic 1, or {{"match": null}} if no match."""
-
-    response = _llm().messages.create(
-        model=MODEL,
-        max_tokens=64,
-        messages=[{"role": "user", "content": prompt}],
-    )
-
-    try:
-        data = json.loads(response.content[0].text.strip())
-        match_idx = data.get("match")
-        if match_idx and 1 <= match_idx <= len(candidates):
-            return candidates[match_idx - 1][0].id
-    except Exception:
-        pass
-    return None
-
-
-def _merge_summaries(old: str, new: str) -> str:
-    prompt = f"""Merge these two summaries of the same topic into one concise 1-2 sentence summary:
-
-Old: {old}
-New: {new}
-
-Return only the merged summary, no explanation."""
-
-    response = _llm().messages.create(
-        model=MODEL,
-        max_tokens=256,
-        messages=[{"role": "user", "content": prompt}],
-    )
-    return response.content[0].text.strip()
-
-
-def _link_to_related(new_node: TopicNode, existing: List[TopicNode]) -> None:
-    from .embedder import cosine_similarity, from_bytes
-    if new_node.embedding is None:
-        return
-    new_vec = from_bytes(new_node.embedding)
-
-    for node in existing:
-        if node.embedding is None:
-            continue
-        sim = cosine_similarity(new_vec, from_bytes(node.embedding))
-        if sim > 0.6:
-            add_topic_edge(new_node.id, node.id, "RELATED_TO", weight=sim)
+        if sim > best_sim:
+            best_sim = sim
+            best = node
+    return best

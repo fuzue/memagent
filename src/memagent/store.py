@@ -172,3 +172,63 @@ def _row_to_topic(r) -> TopicNode:
         entity_type=r["entity_type"], created_at=r["created_at"],
         updated_at=r["updated_at"], embedding=r["embedding"],
     )
+
+
+# ── Episodes (Tier 2 — archive of consolidated EPGs) ──────────────────────────
+
+def add_episode(
+    episode_id: str, session_file: str, started_at: float, ended_at: float,
+    transcript: str, summary: str, embedding: bytes
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO episodes (id, session_file, started_at, ended_at, transcript, summary, embedding)
+               VALUES (?,?,?,?,?,?,?)""",
+            (episode_id, session_file, started_at, ended_at, transcript, summary, embedding),
+        )
+
+
+def add_episode_turn(
+    turn_id: str, episode_id: str, role: str, text: str,
+    timestamp: float, embedding: bytes = None
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO episode_turns (id, episode_id, role, text, timestamp, embedding)
+               VALUES (?,?,?,?,?,?)""",
+            (turn_id, episode_id, role, text, timestamp, embedding),
+        )
+
+
+def add_entity_episode_link(entity_node_id: str, episode_id: str, score: float = 1.0) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO entity_episode_links
+               (entity_node_id, episode_id, relevance_score, created_at)
+               VALUES (?,?,?,?)""",
+            (entity_node_id, episode_id, score, time.time()),
+        )
+
+
+def get_episodes_for_entity(entity_node_id: str, limit: int = 5) -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT e.id, e.summary, e.transcript, e.started_at, e.ended_at, l.relevance_score
+               FROM entity_episode_links l
+               JOIN episodes e ON e.id = l.episode_id
+               WHERE l.entity_node_id = ?
+               ORDER BY l.relevance_score DESC, e.started_at DESC
+               LIMIT ?""",
+            (entity_node_id, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def get_all_episodes() -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT id, summary, transcript, started_at, ended_at, embedding
+               FROM episodes
+               ORDER BY started_at DESC"""
+        ).fetchall()
+    return [dict(r) for r in rows]
