@@ -58,13 +58,21 @@ nav {
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
-nav .brand { font-family: "JetBrains Mono", monospace; font-weight: 700; letter-spacing: -0.02em; }
-nav .brand::before {
-  content: ""; display: inline-block; width: 8px; height: 8px;
+nav .brand { font-family: "JetBrains Mono", monospace; font-weight: 700; letter-spacing: -0.02em; display: flex; align-items: center; gap: 14px; }
+nav .brand .dot {
+  width: 8px; height: 8px;
   background: var(--accent); border-radius: 50%;
-  margin-right: 10px; vertical-align: middle;
   box-shadow: 0 0 12px var(--accent);
 }
+nav .brand .by {
+  display: inline-flex; align-items: center; gap: 8px;
+  margin-left: 4px; padding-left: 14px;
+  border-left: 1px solid var(--border);
+  font-size: 11px; font-weight: 400;
+  color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.15em;
+}
+nav .brand .by img { height: 14px; filter: brightness(0) invert(1); opacity: 0.65; transition: opacity 150ms; }
+nav .brand .by:hover img { opacity: 1; }
 nav .links { display: flex; gap: 28px; font-size: 14px; color: var(--text-mute); }
 
 /* ── hero ─────────────────────────────────────────────────────────── */
@@ -384,6 +392,19 @@ footer {
   font-size: 14px;
   color: var(--text-mute);
 }
+footer .footer-logo {
+  display: flex; align-items: center; gap: 14px;
+  margin-bottom: 18px;
+}
+footer .footer-logo img { height: 28px; filter: brightness(0) invert(1); opacity: 0.85; }
+footer .footer-logo a { display: inline-flex; }
+footer .footer-logo .sep {
+  width: 1px; height: 20px; background: var(--border);
+}
+footer .footer-logo .project {
+  font-family: "JetBrains Mono", monospace; font-weight: 700;
+  font-size: 14px; letter-spacing: -0.01em;
+}
 footer h4 {
   font-family: "JetBrains Mono", monospace;
   font-size: 12px;
@@ -424,7 +445,13 @@ footer .meta code { background: var(--surface); padding: 2px 6px; border-radius:
 <body>
 
 <nav>
-  <span class="brand">memagent</span>
+  <span class="brand">
+    <span class="dot"></span>
+    memagent
+    <a class="by" href="https://fuzue.tech" target="_blank" rel="noopener" aria-label="Fuzue">
+      by <img src="fuzue-logo.svg" alt="Fuzue">
+    </a>
+  </span>
   <div class="links">
     <a href="#problem">why</a>
     <a href="#architecture">architecture</a>
@@ -629,10 +656,16 @@ footer .meta code { background: var(--surface); padding: 2px 6px; border-radius:
 
 <footer>
   <div>
-    <h4>memagent</h4>
+    <div class="footer-logo">
+      <a href="https://fuzue.tech" target="_blank" rel="noopener" aria-label="Fuzue">
+        <img src="fuzue-logo.svg" alt="Fuzue">
+      </a>
+      <span class="sep"></span>
+      <span class="project">memagent</span>
+    </div>
     <p class="meta">
       Persistent, queryable memory for Claude Code.<br>
-      MIT licensed · maintained by <a href="https://fuzue.tech">fuzue</a>.<br>
+      MIT licensed · maintained by <a href="https://fuzue.tech">Fuzue</a>.<br>
       Inspired by <a href="https://arxiv.org/abs/2604.12285" target="_blank" rel="noopener">GAM (arxiv 2604.12285)</a>.
     </p>
   </div>
