@@ -19,6 +19,14 @@ def embed(texts: List[str]) -> np.ndarray:
     return np.array(list(model.embed(texts)), dtype=np.float32)
 
 
+def embed_batch(texts: List[str]) -> List[np.ndarray]:
+    """Batched embedding for many texts at once. Much faster than embed_one in a loop."""
+    if not texts:
+        return []
+    matrix = embed(texts)
+    return [matrix[i] for i in range(len(texts))]
+
+
 def embed_one(text: str) -> np.ndarray:
     return embed([text])[0]
 

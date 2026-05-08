@@ -59,6 +59,7 @@ def main():
 # ── Commands ──────────────────────────────────────────────────────────────────
 
 def _cmd_consolidate_session():
+    from .boundaries import split_at_boundaries
     from .consolidation import consolidate_turns
     from .db import init_db
     from .session_reader import find_active_session_file, read_turns_since
@@ -79,20 +80,38 @@ def _cmd_consolidate_session():
         print("[memagent] No new turns since last consolidation.", file=sys.stderr)
         return
 
-    result = consolidate_turns(turns, session_file=str(session_file))
+    # Detect semantic boundaries — split into one episode per coherent segment
+    segments = split_at_boundaries(turns)
 
-    # Checkpoint at the timestamp of the last turn we processed
+    print(
+        f"[memagent] {len(turns)} turns split into {len(segments)} segment(s)",
+        file=sys.stderr,
+    )
+
+    total_new = total_touched = total_edges = total_dropped_e = total_dropped_x = 0
+    for i, segment in enumerate(segments, 1):
+        result = consolidate_turns(segment, session_file=str(session_file))
+        total_new += result["nodes_created"]
+        total_touched += result["entities_touched"]
+        total_edges += result["edges_created"]
+        total_dropped_e += result.get("dropped_entities", 0)
+        total_dropped_x += result.get("dropped_edges", 0)
+        print(
+            f"  [{i}/{len(segments)}] episode {result['episode_id'][:8] if result['episode_id'] else '-'} "
+            f"| {len(segment)} turns | +{result['nodes_created']} entities "
+            f"| {result['entities_touched']} touched "
+            f"| {result['edges_created']} edges",
+            file=sys.stderr,
+        )
+
     if turns[-1].iso_ts:
         checkpoint.setdefault("sessions", {})[file_key] = turns[-1].iso_ts
         _save_checkpoint(checkpoint)
 
     print(
-        f"[memagent] episode {result['episode_id'][:8] if result['episode_id'] else '-'} "
-        f"| {len(turns)} turns | {result['nodes_created']} new entities "
-        f"| {result['entities_touched']} touched "
-        f"| {result['edges_created']} edges "
-        f"| dropped {result.get('dropped_entities', 0)} entities, "
-        f"{result.get('dropped_edges', 0)} edges (low confidence)",
+        f"[memagent] total: +{total_new} entities, {total_touched} touched, "
+        f"{total_edges} edges, dropped {total_dropped_e} entities, "
+        f"{total_dropped_x} edges (low confidence)",
         file=sys.stderr,
     )
 
