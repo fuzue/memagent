@@ -38,7 +38,7 @@ def recall_context(query: str) -> str:
     only the most relevant nodes — not the full graph.
 
     The query should reflect what is being discussed right now, not a generic
-    description. Bad: "user context". Good: "grants and funding options for ProjectX".
+    description. Bad: "user context". Good: "deployment options for ProjectX".
     """
     session = get_or_create_session(cwd=os.getcwd())
     results = recall(query, session_id=session.id)

@@ -18,8 +18,8 @@ You don't tell Claude what to remember, and you don't tell it when to recall.
 
 Three layers feed the recall:
 
-- **Entities** — stable long-term facts. "Alice founded Acme, based in Berlin
-  Italy." "ProjectX is an AI reasoning partner for wet labs."
+- **Entities** — stable long-term facts. "Alice founded Acme, based in Berlin."
+  "ProjectX is an internal tool for ingesting customer data."
 - **Past episodes** — date-stamped summaries of past conversations, queryable
   directly. "What did we discuss about grants last Tuesday?"
 - **Live (current session)** — turn-by-turn capture of the in-progress
@@ -51,7 +51,7 @@ extraction.
 ### 2. Register the MCP server
 
 ```bash
-claude mcp add --scope user memagent /home/$USER/memagent/.venv/bin/memagent-mcp
+claude mcp add --scope user memagent "$HOME/memagent/.venv/bin/memagent-mcp"
 ```
 
 This makes `recall_context` and `remember` available as tools in every Claude
@@ -71,8 +71,8 @@ crontab -e
 Append:
 
 ```
-*/2  * * * * /home/USER/memagent/.venv/bin/memagent capture              >> ~/.memagent/cron.log 2>&1
-*/30 * * * * /home/USER/memagent/.venv/bin/memagent consolidate-session  >> ~/.memagent/cron.log 2>&1
+*/2  * * * * $HOME/memagent/.venv/bin/memagent capture              >> $HOME/.memagent/cron.log 2>&1
+*/30 * * * * $HOME/memagent/.venv/bin/memagent consolidate-session  >> $HOME/.memagent/cron.log 2>&1
 ```
 
 That's it. The system runs in the background.
@@ -102,21 +102,21 @@ prepend the result. You'll see something like:
 # Alice
 - founder of Acme
 - based in Berlin
-- speaks Portuguese (native), English, Italian, Spanish, German — does not
-  speak Polish
+- background in distributed systems
 
 # ProjectX
-- AI reasoning partner for wet labs
-- knowledge graph with full provenance
-- every hypothesis traceable to source data and literature
+- internal tool for customer data ingestion
+- written in Python, deployed to Kubernetes
+- depends on the legacy auth service
 
 ## Past episodes
 
-[episode 2026-05-07] Designed the three-tier memory architecture for memagent…
+[episode 2026-01-14] Discussed the migration plan for ProjectX, identified two
+blockers around schema versioning…
 
 ## Live (current session)
 
-[live 13:15] User: should we apply for the EU-Grant?
+[live 13:15] User: should we proceed with the migration this week?
 ```
 
 Claude only calls `recall` when it's relevant — you don't trigger it. If a
@@ -138,7 +138,7 @@ Returns exactly what Claude would see for that query.
 ### Add a fact mid-session
 
 ```bash
-memagent remember "Alice's friend Carol runs a wet lab in Munich, possible second pilot"
+memagent remember "Bob from Acme will join the migration review on Friday"
 ```
 
 The text is treated as a one-turn micro-conversation and processed through
@@ -192,10 +192,10 @@ Counts and last-run timestamps.
 memagent extracts:
 
 - Specific named **people** (Alice, Bob)
-- Named **projects, products, codebases** (ProjectX, projectx-app, CoreLib.jl)
-- **Companies and institutions** (Acme, CentralLab)
+- Named **projects, products, codebases** (ProjectX, internal-cli)
+- **Companies and institutions** (Acme, the central university)
 - **Published works** (papers by title or DOI)
-- Named **grants or programs** (EU-Grant)
+- Named **grants or programs** (an EU funding call)
 - Concrete **tools or technologies** discussed as entities
 
 It deliberately ignores:

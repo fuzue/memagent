@@ -201,10 +201,10 @@ def _extract(transcript: str) -> dict:
 
 WHAT TO EXTRACT (real entities that exist in the world):
 - Specific named people (Alice, Bob)
-- Named projects, products, codebases (ProjectX, projectx-app, CoreLib.jl)
-- Companies and institutions (Acme, CentralLab)
+- Named projects, products, codebases (ProjectX, internal-cli)
+- Companies and institutions (Acme, the central university)
 - Published works (specific papers by title or DOI)
-- Named grants or programs (EU-Grant)
+- Named grants or programs (an EU funding call by name)
 - Concrete tools or technologies if discussed as an entity (PostgreSQL, React)
 
 WHAT NOT TO EXTRACT:
@@ -230,7 +230,7 @@ Return ONLY valid JSON:
   "summary": "1-2 sentence description of what was discussed",
   "entities": [
     {{"name": "Alice", "type": "person", "facts": ["founder of Acme"], "confidence": 0.95}},
-    {{"name": "ProjectX", "type": "project", "facts": ["AI reasoning partner for wet labs"], "confidence": 0.9}}
+    {{"name": "ProjectX", "type": "project", "facts": ["internal customer data ingestion tool"], "confidence": 0.9}}
   ],
   "edges": [
     {{"from": "Alice", "to": "Acme", "type": "FOUNDED", "confidence": 0.95}}
