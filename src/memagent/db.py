@@ -85,6 +85,20 @@ def init_db() -> None:
                 FOREIGN KEY (episode_id) REFERENCES episodes(id) ON DELETE CASCADE
             );
 
+            CREATE TABLE IF NOT EXISTS epg_turns (
+                id            TEXT PRIMARY KEY,
+                session_file  TEXT NOT NULL,
+                role          TEXT NOT NULL,
+                text          TEXT NOT NULL,
+                timestamp     REAL NOT NULL,
+                iso_ts        TEXT NOT NULL,
+                embedding     BLOB,
+                captured_at   REAL NOT NULL
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_epg_session_ts
+                ON epg_turns(session_file, timestamp);
+
             CREATE TABLE IF NOT EXISTS entity_episode_links (
                 entity_node_id  TEXT NOT NULL,
                 episode_id      TEXT NOT NULL,

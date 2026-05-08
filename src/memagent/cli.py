@@ -1,7 +1,8 @@
 """memagent CLI.
 
 Commands:
-  memagent consolidate-session   read active Claude Code session, extract entities (run via cron)
+  memagent capture               capture new turns into live EPG (frequent cron, no LLM)
+  memagent consolidate-session   promote EPG turns to episodes + entities (every 30 min)
   memagent remember <text>       explicitly store a fact mid-session
   memagent recall <query>        test retrieval from the command line
   memagent graph                 export knowledge graph as HTML and open in browser
@@ -27,7 +28,9 @@ def main():
 
     cmd = args[0]
 
-    if cmd == "consolidate-session":
+    if cmd == "capture":
+        _cmd_capture()
+    elif cmd == "consolidate-session":
         _cmd_consolidate_session()
     elif cmd == "graph":
         _cmd_graph()
@@ -58,60 +61,104 @@ def main():
 
 # ── Commands ──────────────────────────────────────────────────────────────────
 
-def _cmd_consolidate_session():
-    from .boundaries import split_at_boundaries
-    from .consolidation import consolidate_turns
+def _cmd_capture():
+    """Capture new conversation turns into the live EPG buffer. No LLM."""
+    import uuid as _uuid
     from .db import init_db
+    from .embedder import embed_batch, to_bytes
     from .session_reader import find_active_session_file, read_turns_since
+    from .store import add_epg_turn
 
     init_db()
-
     session_file = find_active_session_file()
     if not session_file:
-        print("[memagent] No Claude Code session found.", file=sys.stderr)
         return
 
     checkpoint = _load_checkpoint()
     file_key = str(session_file)
-    since_iso = checkpoint.get("sessions", {}).get(file_key)
+    since_iso = checkpoint.get("captured", {}).get(file_key)
 
     turns = read_turns_since(session_file, since_iso)
     if not turns:
-        print("[memagent] No new turns since last consolidation.", file=sys.stderr)
         return
 
-    # Detect semantic boundaries — split into one episode per coherent segment
-    segments = split_at_boundaries(turns)
+    # Batch-embed all new turns
+    vecs = embed_batch([t.text for t in turns])
 
-    print(
-        f"[memagent] {len(turns)} turns split into {len(segments)} segment(s)",
-        file=sys.stderr,
-    )
-
-    total_new = total_touched = total_edges = total_dropped_e = total_dropped_x = 0
-    for i, segment in enumerate(segments, 1):
-        result = consolidate_turns(segment, session_file=str(session_file))
-        total_new += result["nodes_created"]
-        total_touched += result["entities_touched"]
-        total_edges += result["edges_created"]
-        total_dropped_e += result.get("dropped_entities", 0)
-        total_dropped_x += result.get("dropped_edges", 0)
-        print(
-            f"  [{i}/{len(segments)}] episode {result['episode_id'][:8] if result['episode_id'] else '-'} "
-            f"| {len(segment)} turns | +{result['nodes_created']} entities "
-            f"| {result['entities_touched']} touched "
-            f"| {result['edges_created']} edges",
-            file=sys.stderr,
+    for t, v in zip(turns, vecs):
+        add_epg_turn(
+            turn_id=str(_uuid.uuid4()),
+            session_file=file_key,
+            role=t.role,
+            text=t.text,
+            timestamp=t.timestamp,
+            iso_ts=t.iso_ts,
+            embedding=to_bytes(v),
         )
 
     if turns[-1].iso_ts:
-        checkpoint.setdefault("sessions", {})[file_key] = turns[-1].iso_ts
+        checkpoint.setdefault("captured", {})[file_key] = turns[-1].iso_ts
         _save_checkpoint(checkpoint)
 
+    print(f"[memagent capture] +{len(turns)} turns to EPG", file=sys.stderr)
+
+
+def _cmd_consolidate_session():
+    """Promote EPG turns into archived episodes + entity graph."""
+    from .boundaries import split_at_boundaries
+    from .consolidation import consolidate_turns
+    from .db import init_db
+    from .embedder import from_bytes
+    from .session_reader import Turn
+    from .store import delete_epg_turns, get_epg_turns
+
+    init_db()
+    epg_rows = get_epg_turns()
+    if not epg_rows:
+        print("[memagent] EPG buffer empty.", file=sys.stderr)
+        return
+
+    # Group by session file so each session promotes independently
+    by_session: dict[str, list] = {}
+    for r in epg_rows:
+        by_session.setdefault(r["session_file"], []).append(r)
+
+    grand_total = {"new": 0, "touched": 0, "edges": 0, "dropped_e": 0, "dropped_x": 0}
+
+    for session_file, rows in by_session.items():
+        turns = [
+            Turn(role=r["role"], text=r["text"], timestamp=r["timestamp"], iso_ts=r["iso_ts"])
+            for r in rows
+        ]
+        segments = split_at_boundaries(turns)
+
+        print(
+            f"[memagent] {session_file.split('/')[-1]}: "
+            f"{len(turns)} EPG turns → {len(segments)} segment(s)",
+            file=sys.stderr,
+        )
+
+        for i, segment in enumerate(segments, 1):
+            result = consolidate_turns(segment, session_file=session_file)
+            grand_total["new"] += result["nodes_created"]
+            grand_total["touched"] += result["entities_touched"]
+            grand_total["edges"] += result["edges_created"]
+            grand_total["dropped_e"] += result.get("dropped_entities", 0)
+            grand_total["dropped_x"] += result.get("dropped_edges", 0)
+            print(
+                f"  [{i}/{len(segments)}] episode {result['episode_id'][:8] if result['episode_id'] else '-'} "
+                f"| {len(segment)} turns | +{result['nodes_created']} entities "
+                f"| {result['entities_touched']} touched | {result['edges_created']} edges",
+                file=sys.stderr,
+            )
+
+        # Drain the EPG turns we just promoted
+        delete_epg_turns([r["id"] for r in rows])
+
     print(
-        f"[memagent] total: +{total_new} entities, {total_touched} touched, "
-        f"{total_edges} edges, dropped {total_dropped_e} entities, "
-        f"{total_dropped_x} edges (low confidence)",
+        f"[memagent] total: +{grand_total['new']} entities, {grand_total['touched']} touched, "
+        f"{grand_total['edges']} edges, dropped {grand_total['dropped_e']} entities, "
+        f"{grand_total['dropped_x']} edges (low confidence)",
         file=sys.stderr,
     )
 

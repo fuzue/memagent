@@ -232,3 +232,46 @@ def get_all_episodes() -> list:
                ORDER BY started_at DESC"""
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+# ── Live EPG buffer (Tier 1 — real-time, pre-consolidation) ───────────────────
+
+def add_epg_turn(
+    turn_id: str, session_file: str, role: str, text: str,
+    timestamp: float, iso_ts: str, embedding: bytes
+) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO epg_turns
+               (id, session_file, role, text, timestamp, iso_ts, embedding, captured_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (turn_id, session_file, role, text, timestamp, iso_ts, embedding, time.time()),
+        )
+
+
+def get_epg_turns(session_file: str = None) -> list:
+    with get_conn() as conn:
+        if session_file:
+            rows = conn.execute(
+                """SELECT * FROM epg_turns WHERE session_file = ?
+                   ORDER BY timestamp ASC""",
+                (session_file,),
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM epg_turns ORDER BY timestamp ASC"
+            ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def delete_epg_turns(turn_ids: list[str]) -> None:
+    if not turn_ids:
+        return
+    placeholders = ",".join("?" for _ in turn_ids)
+    with get_conn() as conn:
+        conn.execute(f"DELETE FROM epg_turns WHERE id IN ({placeholders})", turn_ids)
+
+
+def epg_turn_count() -> int:
+    with get_conn() as conn:
+        return conn.execute("SELECT COUNT(*) FROM epg_turns").fetchone()[0]
