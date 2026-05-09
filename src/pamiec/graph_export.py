@@ -37,9 +37,19 @@ def export_html(output_path: Path) -> None:
         edge_rows = conn.execute(
             "SELECT source_id, target_id, edge_type, weight FROM topic_edges"
         ).fetchall()
-        episode_rows = conn.execute(
-            "SELECT id, summary, started_at FROM episodes ORDER BY started_at DESC LIMIT 50"
-        ).fetchall()
+        # Only show episodes that link to at least one entity. Orphan episodes
+        # (cron windows where no entities were extracted) are real data — they
+        # stay in the DB and remain searchable via recall — but they clutter
+        # the graph view without adding information.
+        episode_rows = conn.execute("""
+            SELECT e.id, e.summary, e.started_at
+            FROM episodes e
+            WHERE EXISTS (
+                SELECT 1 FROM entity_episode_links l WHERE l.episode_id = e.id
+            )
+            ORDER BY e.started_at DESC
+            LIMIT 50
+        """).fetchall()
         link_rows = conn.execute(
             "SELECT entity_node_id, episode_id FROM entity_episode_links"
         ).fetchall()

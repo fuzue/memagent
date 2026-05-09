@@ -54,6 +54,20 @@ def consolidate_turns(turns: list[Turn], session_file: str = "") -> dict:
     dropped_entities = len(extracted.get("entities", [])) - len(entities)
     dropped_edges = len(extracted.get("edges", [])) - len(raw_edges)
 
+    # Skip archival entirely when no entities pass the confidence gate.
+    # Such windows are mostly bash + reads — no signal worth keeping. The
+    # original session JSONL stays on disk as the source of truth.
+    if not entities:
+        return {
+            "episode_id": None,
+            "nodes_created": 0,
+            "edges_created": 0,
+            "entities_touched": 0,
+            "dropped_entities": dropped_entities,
+            "dropped_edges": dropped_edges,
+            "skipped_no_entities": True,
+        }
+
     # Archive episode
     episode_id = str(uuid.uuid4())
     add_episode(
