@@ -35,24 +35,56 @@ python runner.py
 python score.py
 ```
 
-## What you should see
+## The four arms (2×2 design)
+
+To isolate pamiec's contribution from the contribution of prompt-engineered
+calibration, the benchmark runs four arms:
+
+|                    | no recall          | with recall (pamiec)   |
+| ------------------ | ------------------ | ---------------------- |
+| **naive prompt**   | `naive_baseline`   | `naive_with_pamiec`    |
+| **calibrated**     | `baseline`         | `with_pamiec`          |
+
+- **naive prompt**: "You are a helpful assistant. Answer the user's question concisely."
+- **calibrated prompt**: explicitly tells the model to say "no information" if not supported, and not to invent specifics.
+
+## What you should see (Haiku 4.5)
 
 ```
-Category           | Arm            |    Acc  NoInfo  Halluc    InTok   OutTok  Lat(ms)
-------------------------------------------------------------------------------------------
-single_hop         | baseline       |    0%   100%      0%        90       26     1005
-single_hop         | with_pamiec    |  100%     0%      0%      2080      103     2302
-multi_hop          | baseline       |    0%   100%      0%       102       31     1382
-multi_hop          | with_pamiec    |  100%     0%      0%      2177      112     2712
-temporal           | baseline       |    0%   100%      0%        98       30      896
-temporal           | with_pamiec    |  100%     0%      0%      2127      157     4713
-negative_probe     | baseline       |  100%   100%      0%        95       29     2279
-negative_probe     | with_pamiec    |  100%   100%      0%      2131      100     2170
+Category         | Arm                  |    Acc  NoInfo  Halluc    InTok   OutTok  Lat(ms)
+------------------------------------------------------------------------------------------------
+single_hop       | naive_baseline       |    0%   100%      0%        30      114     1644
+single_hop       | naive_with_pamiec    |  100%     0%      0%      1963      135     2337
+single_hop       | baseline             |    0%   100%      0%        90       30      904
+single_hop       | with_pamiec          |  100%     0%      0%      2079      106     2665
+multi_hop        | naive_baseline       |    0%   100%      0%        42      126     3444
+multi_hop        | naive_with_pamiec    |  100%     0%      0%      2053      182     4134
+multi_hop        | baseline             |    0%   100%      0%       102       28      868
+multi_hop        | with_pamiec          |  100%     0%      0%      2171      110     2064
+temporal         | naive_baseline       |    0%   100%      0%        38      212     3462
+temporal         | naive_with_pamiec    |  100%     0%      0%      2018      277     4436
+temporal         | baseline             |    0%   100%      0%        98       32     1090
+temporal         | with_pamiec          |  100%     0%      0%      2127      162     2715
+negative_probe   | naive_baseline       |  100%   100%      0%        35      116     1746
+negative_probe   | naive_with_pamiec    |  100%   100%      0%      2025      193     2971
+negative_probe   | baseline             |  100%   100%      0%        95       25      955
+negative_probe   | with_pamiec          |  100%   100%      0%      2123      103     2961
 
 OVERALL
-baseline           | accuracy 3/10 = 30%   | hallucinations 0/10  | avg 95+29 tok    | avg 1441 ms
-with_pamiec        | accuracy 10/10 = 100% | hallucinations 0/10  | avg 2124+115 tok | avg 2827 ms
+naive_baseline       | accuracy 3/10 =  30%  | hallucinations 0/10  | avg    35+137 tok  | avg 2398 ms
+naive_with_pamiec    | accuracy 10/10 = 100% | hallucinations 0/10  | avg  2010+190 tok  | avg 3306 ms
+baseline             | accuracy 3/10 =  30%  | hallucinations 0/10  | avg    95+28  tok  | avg  950 ms
+with_pamiec          | accuracy 10/10 = 100% | hallucinations 0/10  | avg  2120+117 tok  | avg 2644 ms
 ```
+
+### What this means
+
+- **Pamiec accounts for the entire accuracy gain.** Both with-recall arms score 100%; both no-recall arms score 30% (which equals the 3/10 negative probes that are correctly answered "no" without recall).
+- **The calibration prompt makes no measurable difference for Haiku 4.5.** Naive and calibrated arms have identical scores. The model is well-calibrated by default — when it doesn't know, it says so. This is a finding about Haiku 4.5, not about pamiec; with older / weaker models the calibration prompt may matter more.
+- **No hallucinations in any arm.** The 0% hallucination rate across all four conditions is itself a notable result: even with naive prompting and pamiec-injected context, Haiku 4.5 doesn't confabulate confident wrong answers.
+- **Cost overhead:** pamiec's recall injects ~2k input tokens per question. Output tokens stay similar; latency adds ~1–2 s per question.
+
+The honest headline: **on this benchmark, pamiec doubles+ Claude's recall accuracy with no observable hallucination cost.** The 70 pp absolute improvement should not be claimed as a general result until the question count scales beyond 10 and the model count beyond Haiku 4.5.
 
 ## Layout
 

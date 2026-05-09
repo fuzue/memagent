@@ -6,17 +6,35 @@
       "no_info": 3,
       "halluc": 0,
       "in_tok": 270,
-      "out_tok": 78,
-      "latency_ms": 3016
+      "out_tok": 91,
+      "latency_ms": 2712
     },
     "with_pamiec|single_hop": {
       "n": 3,
       "correct": 3,
       "no_info": 0,
       "halluc": 0,
-      "in_tok": 6239,
-      "out_tok": 308,
-      "latency_ms": 6905
+      "in_tok": 6237,
+      "out_tok": 318,
+      "latency_ms": 7996
+    },
+    "naive_baseline|single_hop": {
+      "n": 3,
+      "correct": 0,
+      "no_info": 3,
+      "halluc": 0,
+      "in_tok": 90,
+      "out_tok": 342,
+      "latency_ms": 4932
+    },
+    "naive_with_pamiec|single_hop": {
+      "n": 3,
+      "correct": 3,
+      "no_info": 0,
+      "halluc": 0,
+      "in_tok": 5889,
+      "out_tok": 405,
+      "latency_ms": 7010
     },
     "baseline|multi_hop": {
       "n": 2,
@@ -24,17 +42,35 @@
       "no_info": 2,
       "halluc": 0,
       "in_tok": 203,
-      "out_tok": 62,
-      "latency_ms": 2764
+      "out_tok": 56,
+      "latency_ms": 1737
     },
     "with_pamiec|multi_hop": {
       "n": 2,
       "correct": 2,
       "no_info": 0,
       "halluc": 0,
-      "in_tok": 4354,
-      "out_tok": 225,
-      "latency_ms": 5424
+      "in_tok": 4342,
+      "out_tok": 219,
+      "latency_ms": 4128
+    },
+    "naive_baseline|multi_hop": {
+      "n": 2,
+      "correct": 0,
+      "no_info": 2,
+      "halluc": 0,
+      "in_tok": 83,
+      "out_tok": 253,
+      "latency_ms": 6889
+    },
+    "naive_with_pamiec|multi_hop": {
+      "n": 2,
+      "correct": 2,
+      "no_info": 0,
+      "halluc": 0,
+      "in_tok": 4106,
+      "out_tok": 365,
+      "latency_ms": 8269
     },
     "baseline|temporal": {
       "n": 2,
@@ -42,8 +78,8 @@
       "no_info": 2,
       "halluc": 0,
       "in_tok": 196,
-      "out_tok": 61,
-      "latency_ms": 1793
+      "out_tok": 64,
+      "latency_ms": 2181
     },
     "with_pamiec|temporal": {
       "n": 2,
@@ -51,8 +87,26 @@
       "no_info": 0,
       "halluc": 0,
       "in_tok": 4254,
-      "out_tok": 314,
-      "latency_ms": 9426
+      "out_tok": 325,
+      "latency_ms": 5430
+    },
+    "naive_baseline|temporal": {
+      "n": 2,
+      "correct": 0,
+      "no_info": 2,
+      "halluc": 0,
+      "in_tok": 76,
+      "out_tok": 425,
+      "latency_ms": 6925
+    },
+    "naive_with_pamiec|temporal": {
+      "n": 2,
+      "correct": 2,
+      "no_info": 0,
+      "halluc": 0,
+      "in_tok": 4035,
+      "out_tok": 554,
+      "latency_ms": 8871
     },
     "baseline|negative_probe": {
       "n": 3,
@@ -60,17 +114,35 @@
       "no_info": 3,
       "halluc": 0,
       "in_tok": 284,
-      "out_tok": 86,
-      "latency_ms": 6838
+      "out_tok": 74,
+      "latency_ms": 2866
     },
     "with_pamiec|negative_probe": {
       "n": 3,
       "correct": 3,
       "no_info": 3,
       "halluc": 0,
-      "in_tok": 6394,
-      "out_tok": 301,
-      "latency_ms": 6511
+      "in_tok": 6370,
+      "out_tok": 310,
+      "latency_ms": 8882
+    },
+    "naive_baseline|negative_probe": {
+      "n": 3,
+      "correct": 3,
+      "no_info": 3,
+      "halluc": 0,
+      "in_tok": 104,
+      "out_tok": 349,
+      "latency_ms": 5238
+    },
+    "naive_with_pamiec|negative_probe": {
+      "n": 3,
+      "correct": 3,
+      "no_info": 3,
+      "halluc": 0,
+      "in_tok": 6074,
+      "out_tok": 578,
+      "latency_ms": 8912
     }
   }
 }

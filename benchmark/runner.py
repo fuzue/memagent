@@ -37,13 +37,25 @@ except ImportError:  # pragma: no cover
 
 MODEL = os.environ.get("BENCH_MODEL", "claude-haiku-4-5-20251001")
 
-SYSTEM_PROMPT = """You are answering questions about a software engineering team's recent work.
+# Two system prompts let us isolate the contribution of pamiec from the contribution
+# of prompt-engineered calibration. The 2x2 over (prompt × recall) is below.
+SYSTEM_PROMPT_CALIBRATED = """You are answering questions about a software engineering team's recent work.
 
 Rules:
 - Answer concisely, in one or two sentences.
 - If the answer is not supported by available context, say "no information" or "not discussed". Do NOT guess.
 - Do not invent specific names, numbers, or facts that aren't grounded.
 """
+
+SYSTEM_PROMPT_NAIVE = """You are a helpful assistant. Answer the user's question concisely."""
+
+# Arm specification: (prompt_to_use, expose_recall_tool)
+ARMS = {
+    "baseline":          (SYSTEM_PROMPT_CALIBRATED, False),  # calibrated, no recall
+    "with_pamiec":       (SYSTEM_PROMPT_CALIBRATED, True),   # calibrated, with recall
+    "naive_baseline":    (SYSTEM_PROMPT_NAIVE,      False),  # naive, no recall — likely hallucinates
+    "naive_with_pamiec": (SYSTEM_PROMPT_NAIVE,      True),   # naive, with recall — does pamiec save it?
+}
 
 
 # ── Tools ────────────────────────────────────────────────────────────────────
@@ -87,11 +99,15 @@ class RunResult:
 
 
 def run_one(client: anthropic.Anthropic, question: dict, arm: str) -> RunResult:
+    if arm not in ARMS:
+        raise ValueError(f"Unknown arm '{arm}'. Known: {list(ARMS.keys())}")
+    system_prompt, has_recall = ARMS[arm]
+
     qid = question["id"]
     category = question["category"]
     user_msg = question["question"]
 
-    tools = [RECALL_TOOL] if arm == "with_pamiec" else []
+    tools = [RECALL_TOOL] if has_recall else []
     messages = [{"role": "user", "content": user_msg}]
     tool_calls = []
     input_tokens = 0
@@ -104,7 +120,7 @@ def run_one(client: anthropic.Anthropic, question: dict, arm: str) -> RunResult:
             resp = client.messages.create(
                 model=MODEL,
                 max_tokens=600,
-                system=SYSTEM_PROMPT,
+                system=system_prompt,
                 tools=tools,
                 messages=messages,
             )
@@ -155,7 +171,12 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--questions", default="questions/b2b_v1.json")
     parser.add_argument("--out", default="results/b2b_v1.jsonl")
-    parser.add_argument("--arm", choices=["baseline", "with_pamiec", "both"], default="both")
+    parser.add_argument(
+        "--arm",
+        action="append",
+        choices=list(ARMS.keys()) + ["all"],
+        help="arm to run (repeat flag for multiple); 'all' runs every arm. Default: all.",
+    )
     args = parser.parse_args()
 
     if not os.environ.get("ANTHROPIC_API_KEY"):
@@ -168,7 +189,10 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     client = anthropic.Anthropic()
-    arms = ["baseline", "with_pamiec"] if args.arm == "both" else [args.arm]
+    if not args.arm or "all" in args.arm:
+        arms = list(ARMS.keys())
+    else:
+        arms = args.arm
 
     with out_path.open("w") as f:
         for q in qs:
@@ -179,9 +203,9 @@ def main():
                 marker = "ERR" if r.error else "OK "
                 tools = f" tools={len(r.tool_calls)}" if r.tool_calls else ""
                 print(
-                    f"  {marker} {q['id']} [{q['category']:14s}] {arm:12s} "
+                    f"  {marker} {q['id']} [{q['category']:14s}] {arm:18s} "
                     f"{r.input_tokens:>5}+{r.output_tokens:<4} tok  "
-                    f"{r.latency_ms:>5}ms{tools}  {r.answer[:80] if r.answer else r.error}"
+                    f"{r.latency_ms:>5}ms{tools}  {(r.answer or r.error)[:75]}"
                 )
 
     print(f"\nResults written to {out_path}")

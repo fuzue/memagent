@@ -11,11 +11,17 @@ import re
 from collections import defaultdict
 from pathlib import Path
 
-# Phrases that indicate the model correctly admits it doesn't know.
+# Phrases that indicate the model is NOT confirming the proposition — either
+# admitting ignorance or grounding a denial. Both are valid answers to a
+# negative-probe question.
 NO_INFO_PHRASES = [
+    # admissions of ignorance
     "no information", "not discussed", "no evidence", "not mentioned",
     "i don't have", "no record", "no context", "isn't mentioned",
     "no details", "not in", "couldn't find", "no confirmation",
+    # grounded denials
+    "no mention", "no, ", "no.", "is not ", "isn't ", "wasn't ",
+    "didn't ", "did not ", "does not ", "doesn't ",
 ]
 
 # Strong hallucination signals — confident confirmations of made-up facts.
@@ -59,16 +65,21 @@ def score_question(question: dict, answer: str) -> dict:
     #   - expected_keywords (if present): ALL must appear
     #   - expected_keywords_any_of (if present): at least ONE group must be fully present
     # If both are present, both must be satisfied.
+    # CRITICAL: if the answer also admits no-info, it can't be 'correct' regardless of
+    # keyword presence — the model didn't actually answer the question. Common pattern
+    # is "I don't have information about Postgres→ClickHouse but here are general
+    # reasons..." which would otherwise score positive by parroting question terms.
     kws = question.get("expected_keywords", [])
     any_of = question.get("expected_keywords_any_of")
 
     keyword_pass = _has_all_keywords(answer, kws) if kws else True
     any_of_pass = _matches_any_group(answer, any_of) if any_of else True
-    correct = keyword_pass and any_of_pass
+    admits = _has_any(answer, NO_INFO_PHRASES)
+    correct = keyword_pass and any_of_pass and not admits
 
     return {
         "correct": correct,
-        "admits_no_info": _has_any(answer, NO_INFO_PHRASES),
+        "admits_no_info": admits,
         "hallucinates": False,
     }
 
@@ -102,8 +113,8 @@ def aggregate(results_path: Path, questions: list[dict]) -> dict:
 
 def print_table(by_arm_cat: dict, arms: list[str], cats: list[str]) -> None:
     print()
-    print(f"{'Category':<18} | {'Arm':<14} | {'Acc':>6}  {'NoInfo':>6}  {'Halluc':>6}  {'InTok':>7}  {'OutTok':>7}  {'Lat(ms)':>7}")
-    print("-" * 90)
+    print(f"{'Category':<16} | {'Arm':<20} | {'Acc':>6}  {'NoInfo':>6}  {'Halluc':>6}  {'InTok':>7}  {'OutTok':>7}  {'Lat(ms)':>7}")
+    print("-" * 96)
     for cat in cats:
         for arm in arms:
             agg = by_arm_cat.get((arm, cat))
@@ -116,13 +127,13 @@ def print_table(by_arm_cat: dict, arms: list[str], cats: list[str]) -> None:
             it  = agg["in_tok"] / n
             ot  = agg["out_tok"] / n
             lat = agg["latency_ms"] / n
-            print(f"{cat:<18} | {arm:<14} | {acc:>5.0%}  {ni:>5.0%}   {ha:>5.0%}   {it:>7.0f}  {ot:>7.0f}  {lat:>7.0f}")
+            print(f"{cat:<16} | {arm:<20} | {acc:>5.0%}  {ni:>5.0%}   {ha:>5.0%}   {it:>7.0f}  {ot:>7.0f}  {lat:>7.0f}")
         print()
 
 
 def print_summary(by_arm_cat: dict, arms: list[str]) -> None:
-    print(f"\n{'OVERALL':<18}")
-    print("-" * 90)
+    print(f"\n{'OVERALL':<16}")
+    print("-" * 96)
     for arm in arms:
         n = sum(a["n"]      for k, a in by_arm_cat.items() if k[0] == arm)
         c = sum(a["correct"]for k, a in by_arm_cat.items() if k[0] == arm)
@@ -130,8 +141,8 @@ def print_summary(by_arm_cat: dict, arms: list[str]) -> None:
         it= sum(a["in_tok"] for k, a in by_arm_cat.items() if k[0] == arm)
         ot= sum(a["out_tok"]for k, a in by_arm_cat.items() if k[0] == arm)
         lt= sum(a["latency_ms"] for k, a in by_arm_cat.items() if k[0] == arm)
-        print(f"{arm:<18} | accuracy {c}/{n} = {c/n:.0%}  | hallucinations {h}/{n}  "
-              f"| avg {it/n:.0f}+{ot/n:.0f} tok  | avg {lt/n:.0f} ms")
+        print(f"{arm:<20} | accuracy {c}/{n} = {c/n:>4.0%}  | hallucinations {h}/{n}  "
+              f"| avg {it/n:>5.0f}+{ot/n:<3.0f} tok  | avg {lt/n:>5.0f} ms")
     print()
 
 
@@ -146,10 +157,15 @@ def main():
     res_path = bench_dir / args.results
     out = aggregate(res_path, qs)
 
-    arms = ["baseline", "with_pamiec"]
+    # Order arms by the 2x2 design: naive first, calibrated second; within each, no-recall before recall.
+    arm_order = ["naive_baseline", "naive_with_pamiec", "baseline", "with_pamiec"]
+    arms_present = sorted(
+        {k[0] for k in out["by_arm_cat"]},
+        key=lambda a: arm_order.index(a) if a in arm_order else 999,
+    )
     cats = ["single_hop", "multi_hop", "temporal", "negative_probe"]
-    print_table(out["by_arm_cat"], arms, cats)
-    print_summary(out["by_arm_cat"], arms)
+    print_table(out["by_arm_cat"], arms_present, cats)
+    print_summary(out["by_arm_cat"], arms_present)
 
     # Save aggregated JSON for downstream analysis
     summary = {
