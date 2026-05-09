@@ -64,13 +64,18 @@ RECALL_TOOL = {
     "name": "recall_context",
     "description": (
         "Query the long-term memory graph for context relevant to the user's question. "
-        "Returns relevant entity facts and past episode summaries. "
-        "Use whenever the question references people, projects, decisions, or anything that may have prior history."
+        "Returns relevant entity facts and past episode summaries.\n\n"
+        "ALWAYS call this BEFORE answering any question that references a specific named "
+        "person, project, company, decision, grant, tool, or organization — even if the "
+        "name appears unfamiliar to you. The graph may contain it. Do not refuse with "
+        "'no information' until recall_context has been tried at least once.\n\n"
+        "When you do refuse, refuse only AFTER an empty recall result, and explicitly note "
+        "that you searched the graph."
     ),
     "input_schema": {
         "type": "object",
         "properties": {
-            "query": {"type": "string", "description": "Natural language description of what you're looking for."}
+            "query": {"type": "string", "description": "Natural language description of what you're looking for. Include the named entity from the question verbatim."}
         },
         "required": ["query"],
     },

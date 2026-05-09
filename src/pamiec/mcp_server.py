@@ -29,12 +29,21 @@ mcp = CompatFastMCP("pamiec")
 def recall_context(query: str) -> str:
     """Query the knowledge graph for context relevant to the current conversation.
 
-    Use this whenever the conversation touches on people, projects, companies,
-    decisions, constraints, or anything that might have prior history. Returns
-    only the most relevant nodes — not the full graph.
+    ALWAYS call this BEFORE answering any question that references a specific
+    named person, project, company, decision, grant, tool, or organization —
+    even if the name appears unfamiliar to you. The graph may contain it. Do
+    NOT refuse with 'no information' until recall_context has been tried at
+    least once.
 
-    The query should reflect what is being discussed right now, not a generic
-    description. Bad: "user context". Good: "deployment options for ProjectX".
+    Returns only the most relevant nodes — not the full graph. Pass the
+    user's actual phrasing (especially named entities verbatim), not a
+    paraphrased generic description.
+
+    Examples:
+      Good: "deployment options for ProjectX"
+      Good: "MisspecStudy central question"
+      Bad:  "user context"
+      Bad:  "research project details"
     """
     from .retrieval import format_context, recall
     return format_context(recall(query))

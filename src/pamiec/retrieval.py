@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
 from typing import List, Optional
@@ -24,6 +25,49 @@ class Result:
     timestamp: Optional[float] = None
 
 
+# Tokens shorter than this don't earn a keyword boost — too noisy.
+KEYWORD_MIN_LEN = 4
+# Words that should never count as keyword-match signal even if they appear in the query.
+KEYWORD_STOPWORDS = {
+    "what", "when", "where", "which", "whose", "whom", "this", "that", "these",
+    "those", "have", "have", "does", "doing", "they", "them", "their", "there",
+    "with", "from", "into", "about", "been", "being", "were", "will", "would",
+    "could", "should", "shall", "must", "your", "yours", "mine", "ours",
+    "theirs", "current", "currently", "include", "includes", "including",
+    "between", "based", "research", "design", "designed", "answer", "central",
+    "question", "team", "project", "team's", "company", "previously",
+    "consider", "considered", "evaluate", "evaluated", "platform", "platforms",
+    "round", "raise", "raised", "recently", "during",
+}
+
+
+def _keyword_boost(query: str, csum: str, craw: str) -> float:
+    """Boost a node when literal query tokens (entity-like terms) appear in its
+    csum or craw. Helps surface named-entity matches that BAAI/bge-small smooths
+    away — e.g. queries like 'What is MisspecStudy designed to answer?' should
+    boost the MisspecStudy node decisively even when its semantic similarity is
+    only middling.
+
+    Scoring:
+      +0.20 per query token that appears literally in csum (capped at 2 hits)
+      +0.05 per query token that appears literally in craw  (capped at 2 hits)
+
+    Tokens are case-folded; stopwords and short tokens are skipped.
+    """
+    tokens = {
+        t.lower() for t in re.findall(r"[A-Za-z][A-Za-z0-9.\-]+", query)
+        if len(t) >= KEYWORD_MIN_LEN and t.lower() not in KEYWORD_STOPWORDS
+    }
+    if not tokens:
+        return 0.0
+
+    csum_l = csum.lower()
+    craw_l = craw.lower()
+    csum_hits = sum(1 for t in tokens if t in csum_l)
+    craw_hits = sum(1 for t in tokens if t in craw_l)
+    return 0.20 * min(csum_hits, 2) + 0.05 * min(craw_hits, 2)
+
+
 def recall(query: str, session_id: Optional[str] = None, top_n: int = 8) -> List[Result]:
     query_vec = embed_one(query)
     results: List[Result] = []
@@ -38,7 +82,11 @@ def recall(query: str, session_id: Optional[str] = None, top_n: int = 8) -> List
         vec = from_bytes(node.embedding)
         sim = cosine_similarity(query_vec, vec)
         recency = _recency_boost(node.updated_at)
-        score = sim * 0.8 + recency * 0.2
+        kw = _keyword_boost(query, node.csum or "", node.craw or "")
+        # Final score: semantic + recency + keyword. Keyword boost is additive
+        # so a node with a literal entity-name match can rise from outside
+        # top-K to the top, even when bge-small under-weights the entity name.
+        score = sim * 0.8 + recency * 0.2 + kw
         topic_scores.append((node, score))
 
     topic_scores.sort(key=lambda x: x[1], reverse=True)
