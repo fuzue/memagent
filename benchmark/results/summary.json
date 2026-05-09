@@ -5,144 +5,144 @@
       "correct": 0,
       "no_info": 11,
       "halluc": 0,
-      "in_tok": 1029,
-      "out_tok": 303,
-      "latency_ms": 10651
+      "in_tok": 1040,
+      "out_tok": 65,
+      "latency_ms": 21678
     },
     "with_pamiec|single_hop": {
       "n": 11,
       "correct": 11,
       "no_info": 0,
       "halluc": 0,
-      "in_tok": 22878,
-      "out_tok": 1076,
-      "latency_ms": 24530
+      "in_tok": 22952,
+      "out_tok": 1069,
+      "latency_ms": 51729
     },
     "naive_baseline|single_hop": {
       "n": 11,
       "correct": 0,
-      "no_info": 10,
+      "no_info": 8,
       "halluc": 0,
-      "in_tok": 369,
-      "out_tok": 1142,
-      "latency_ms": 17305
+      "in_tok": 380,
+      "out_tok": 759,
+      "latency_ms": 26279
     },
     "naive_with_pamiec|single_hop": {
       "n": 11,
-      "correct": 11,
-      "no_info": 0,
+      "correct": 10,
+      "no_info": 1,
       "halluc": 0,
-      "in_tok": 21674,
-      "out_tok": 1474,
-      "latency_ms": 78475
+      "in_tok": 21618,
+      "out_tok": 1317,
+      "latency_ms": 41217
     },
     "baseline|multi_hop": {
       "n": 7,
       "correct": 0,
       "no_info": 7,
       "halluc": 0,
-      "in_tok": 727,
-      "out_tok": 222,
-      "latency_ms": 7508
+      "in_tok": 734,
+      "out_tok": 67,
+      "latency_ms": 8660
     },
     "with_pamiec|multi_hop": {
       "n": 7,
-      "correct": 6,
-      "no_info": 1,
+      "correct": 7,
+      "no_info": 0,
       "halluc": 0,
-      "in_tok": 15461,
-      "out_tok": 766,
-      "latency_ms": 16216
+      "in_tok": 17134,
+      "out_tok": 947,
+      "latency_ms": 28505
     },
     "naive_baseline|multi_hop": {
       "n": 7,
       "correct": 0,
-      "no_info": 7,
+      "no_info": 5,
       "halluc": 0,
-      "in_tok": 307,
-      "out_tok": 931,
-      "latency_ms": 14350
+      "in_tok": 314,
+      "out_tok": 698,
+      "latency_ms": 21463
     },
     "naive_with_pamiec|multi_hop": {
       "n": 7,
       "correct": 7,
       "no_info": 0,
       "halluc": 0,
-      "in_tok": 15340,
-      "out_tok": 1414,
-      "latency_ms": 23229
+      "in_tok": 15316,
+      "out_tok": 1280,
+      "latency_ms": 36684
     },
     "baseline|temporal": {
       "n": 5,
       "correct": 0,
       "no_info": 5,
       "halluc": 0,
-      "in_tok": 496,
-      "out_tok": 189,
-      "latency_ms": 5762
+      "in_tok": 501,
+      "out_tok": 28,
+      "latency_ms": 4930
     },
     "with_pamiec|temporal": {
       "n": 5,
       "correct": 5,
       "no_info": 0,
       "halluc": 0,
-      "in_tok": 10836,
-      "out_tok": 745,
-      "latency_ms": 12944
+      "in_tok": 10841,
+      "out_tok": 734,
+      "latency_ms": 27132
     },
     "naive_baseline|temporal": {
       "n": 5,
       "correct": 0,
       "no_info": 5,
       "halluc": 0,
-      "in_tok": 196,
-      "out_tok": 1069,
-      "latency_ms": 13554
+      "in_tok": 201,
+      "out_tok": 1070,
+      "latency_ms": 26233
     },
     "naive_with_pamiec|temporal": {
       "n": 5,
-      "correct": 2,
-      "no_info": 3,
+      "correct": 4,
+      "no_info": 1,
       "halluc": 0,
-      "in_tok": 10404,
-      "out_tok": 1551,
-      "latency_ms": 22934
+      "in_tok": 10244,
+      "out_tok": 1503,
+      "latency_ms": 37328
     },
     "baseline|negative_probe": {
       "n": 7,
       "correct": 7,
       "no_info": 7,
       "halluc": 0,
-      "in_tok": 669,
-      "out_tok": 210,
-      "latency_ms": 6529
+      "in_tok": 676,
+      "out_tok": 58,
+      "latency_ms": 8207
     },
     "with_pamiec|negative_probe": {
       "n": 7,
       "correct": 7,
       "no_info": 7,
       "halluc": 0,
-      "in_tok": 14944,
-      "out_tok": 692,
-      "latency_ms": 16825
+      "in_tok": 14936,
+      "out_tok": 806,
+      "latency_ms": 29334
     },
     "naive_baseline|negative_probe": {
       "n": 7,
       "correct": 7,
       "no_info": 7,
       "halluc": 0,
-      "in_tok": 249,
-      "out_tok": 771,
-      "latency_ms": 21627
+      "in_tok": 256,
+      "out_tok": 817,
+      "latency_ms": 22301
     },
     "naive_with_pamiec|negative_probe": {
       "n": 7,
-      "correct": 5,
-      "no_info": 5,
-      "halluc": 0,
-      "in_tok": 14145,
-      "out_tok": 1403,
-      "latency_ms": 25451
+      "correct": 6,
+      "no_info": 6,
+      "halluc": 1,
+      "in_tok": 14076,
+      "out_tok": 1542,
+      "latency_ms": 41699
     }
   }
 }

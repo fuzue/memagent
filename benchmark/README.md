@@ -96,7 +96,29 @@ The 2×2 collapsed:
 - **Cost overhead:** ~2k extra input tokens per question with recall. Latency adds 1–4 s depending on category.
 - **Single failure** on the strongest arm: q22 (`with_pamiec` multi_hop) — model started "No information" then gave the right answer in its explanation. The scorer correctly treats this confused-but-right answer as incorrect.
 
-The honest headline: **on 30 questions over 1 narrative against Haiku 4.5, pamiec lifts accuracy from 23% to 97% with zero observed hallucinations.** The calibration prompt adds an additional ~14 pp on top of pamiec. Don't generalize past these conditions yet — next steps are more narratives (v0.2) and Sonnet validation, then LoCoMo as the literature-anchored Tier 2.
+The honest headline: **on 30 questions over 1 narrative against Haiku 4.5, pamiec lifts accuracy from 23% to 97% with zero observed hallucinations.** The calibration prompt adds an additional ~14 pp on top of pamiec.
+
+## Sonnet 4.6 validation
+
+Same 30 questions, same narrative, same code, just `BENCH_MODEL=claude-sonnet-4-6`:
+
+|                  | Haiku 4.5 | Sonnet 4.6 |
+|------------------|-----------|------------|
+| naive_baseline   | 23%       | 23%        |
+| naive_with_pamiec| 83%       | 90%        |
+| baseline         | 23%       | 23%        |
+| with_pamiec      | 97%       | **100%**   |
+| Halluc / 120     | 0         | 1          |
+| Latency / Q      | ~2.4 s    | ~4.5 s     |
+| Calib. prompt lift | +14 pp  | +10 pp     |
+
+Two things to note:
+
+1. **Pamiec's gain holds for the stronger model** — with_pamiec hits perfect 30/30 on Sonnet, and the no-recall arms still score identically (23%). Pamiec's value isn't a Haiku-specific artifact.
+
+2. **Sonnet 4.6 with naive prompting produced one confabulation that Haiku didn't.** Q08 asked "Did the team consider Snowflake?" (no — Snowflake is a negative-probe entity). Recall returned context about ClickHouse being chosen for telemetry. Sonnet's naive_with_pamiec arm answered "Yes, but it was not selected; the team chose ClickHouse over Snowflake..." with confident detail. The reasoning move was: ClickHouse "winning" implies alternatives were evaluated, so the question's named entity (Snowflake) must have been one of them. The calibration prompt eliminated this — Sonnet's calibrated arm got the same question right.
+
+This is the kind of failure mode the 2×2 design was built to catch. Stronger reasoning makes the model better at substantive recall and worse at resisting leading questions when the prompt doesn't constrain it.
 
 ## Layout
 

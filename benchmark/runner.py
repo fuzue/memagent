@@ -89,7 +89,8 @@ def _do_recall(query: str) -> str:
 class RunResult:
     question_id: str
     category: str
-    arm: str  # "baseline" or "with_pamiec"
+    arm: str
+    model: str
     answer: str
     tool_calls: list  # [{"query": "...", "result_chars": N}, ...]
     input_tokens: int
@@ -152,7 +153,7 @@ def run_one(client: anthropic.Anthropic, question: dict, arm: str) -> RunResult:
 
     except Exception as e:
         return RunResult(
-            question_id=qid, category=category, arm=arm,
+            question_id=qid, category=category, arm=arm, model=MODEL,
             answer="", tool_calls=tool_calls,
             input_tokens=input_tokens, output_tokens=output_tokens,
             latency_ms=int((time.time() - t0) * 1000),
@@ -160,7 +161,7 @@ def run_one(client: anthropic.Anthropic, question: dict, arm: str) -> RunResult:
         )
 
     return RunResult(
-        question_id=qid, category=category, arm=arm,
+        question_id=qid, category=category, arm=arm, model=MODEL,
         answer=answer, tool_calls=tool_calls,
         input_tokens=input_tokens, output_tokens=output_tokens,
         latency_ms=int((time.time() - t0) * 1000),
