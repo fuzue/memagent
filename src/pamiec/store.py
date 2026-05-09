@@ -200,6 +200,22 @@ def add_episode_turn(
         )
 
 
+def get_all_episode_turns() -> list:
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT id, episode_id, role, text, timestamp, embedding FROM episode_turns"
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def update_episode_turn_embedding(turn_id: str, embedding: bytes) -> None:
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE episode_turns SET embedding=? WHERE id=?",
+            (embedding, turn_id),
+        )
+
+
 def add_entity_episode_link(entity_node_id: str, episode_id: str, score: float = 1.0) -> None:
     with get_conn() as conn:
         conn.execute(

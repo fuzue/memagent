@@ -80,15 +80,18 @@ def consolidate_turns(turns: list[Turn], session_file: str = "") -> dict:
         embedding=to_bytes(embed_one(summary)),
     )
 
-    # Archive individual turns (Tier 1 frozen)
-    for t in turns:
+    # Archive individual turns (Tier 1 frozen) with embeddings so retrieval
+    # can search them directly. Batch-embed for efficiency.
+    from .embedder import embed_batch
+    turn_vecs = embed_batch([t.text for t in turns])
+    for t, v in zip(turns, turn_vecs):
         add_episode_turn(
             turn_id=str(uuid.uuid4()),
             episode_id=episode_id,
             role=t.role,
             text=t.text,
             timestamp=t.timestamp,
-            embedding=None,  # turns embedded lazily on first query
+            embedding=to_bytes(v),
         )
 
     # Tier 3: update entity graph

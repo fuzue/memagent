@@ -10,8 +10,9 @@ import numpy as np
 from .embedder import cosine_similarity, embed_one, from_bytes
 from .models import Event, TopicNode
 from .store import (
-    get_all_episodes, get_all_topic_nodes, get_current_session_events,
-    get_epg_turns, get_episodes_for_entity, get_topic_neighbors,
+    get_all_episode_turns, get_all_episodes, get_all_topic_nodes,
+    get_current_session_events, get_epg_turns, get_episodes_for_entity,
+    get_topic_neighbors,
 )
 
 
@@ -123,7 +124,7 @@ def recall(query: str, session_id: Optional[str] = None, top_n: int = 8) -> List
                 ))
                 seen_ids.add(neighbor.id)
 
-    # ── Search episodes (Tier 2 archive) ──────────────────────────────────────
+    # ── Search episodes (Tier 2 archive — summaries) ──────────────────────────
     for ep in get_all_episodes():
         if not ep.get("embedding"):
             continue
@@ -138,6 +139,30 @@ def recall(query: str, session_id: Optional[str] = None, top_n: int = 8) -> List
             source="episode",
             node_id=ep["id"],
             timestamp=ep["started_at"],
+        ))
+
+    # ── Search episode_turns (Tier 2 archive — per-turn evidence) ─────────────
+    # This is GAM's "structural drill-down" stage: when an entity-level summary
+    # match exists but the question asks for a specific dated event or exact
+    # phrasing, the answer lives in a single archived turn. Discounted vs entity
+    # nodes so a clearly-better turn beats a marginal entity match, but a strong
+    # entity match still wins as the primary anchor.
+    for r in get_all_episode_turns():
+        if not r.get("embedding"):
+            continue
+        sim = cosine_similarity(query_vec, from_bytes(r["embedding"]))
+        if sim < 0.55:  # higher threshold than episodes — turns are noisier individually
+            continue
+        recency = _recency_boost(r["timestamp"], half_life_days=30.0)
+        ts_label = time.strftime("%Y-%m-%d %H:%M", time.localtime(r["timestamp"]))
+        role_label = r["role"].capitalize()
+        snippet = r["text"][:300].replace("\n", " ")
+        results.append(Result(
+            text=f"[turn {ts_label}] {role_label}: {snippet}",
+            score=(sim * 0.8 + recency * 0.2) * 0.75,  # 0.75 discount vs entity nodes
+            source="episode_turn",
+            node_id=r["id"],
+            timestamp=r["timestamp"],
         ))
 
     # ── Search live EPG (Tier 1 — pre-consolidation, real-time) ───────────────
@@ -177,6 +202,7 @@ def format_context(results: List[Result]) -> str:
 
     topic_lines = [r.text for r in results if r.source == "topic"]
     episode_lines = [r.text for r in results if r.source == "episode"]
+    turn_lines = [r.text for r in results if r.source == "episode_turn"]
     epg_lines = [r.text for r in results if r.source == "epg"]
 
     parts = []
@@ -184,6 +210,8 @@ def format_context(results: List[Result]) -> str:
         parts.append("## Entities\n\n" + "\n\n".join(topic_lines))
     if episode_lines:
         parts.append("## Past episodes\n\n" + "\n".join(episode_lines))
+    if turn_lines:
+        parts.append("## Past turns (specific evidence)\n\n" + "\n".join(turn_lines))
     if epg_lines:
         parts.append("## Live (current session)\n\n" + "\n".join(epg_lines))
     return "\n\n".join(parts)
